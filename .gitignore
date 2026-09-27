@@ -1,6 +1,7 @@
 /build/
 /build-*/
 /lib/
+/.venv/
 
 /bin/*
 !/bin/test.conf
