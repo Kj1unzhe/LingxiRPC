@@ -112,7 +112,7 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
                             muduo::net::Buffer *buffer,
                             muduo::Timestamp)
 {
-    //修复优化TCP半包处理，完善RpcProvider::OnMessage()的拆包逻辑
+    // 修复优化TCP半包处理，完善RpcProvider::OnMessage()的拆包逻辑
     constexpr size_t kLengthBytes = sizeof(uint32_t);
 
     // 示例上限，后续可以改成配置项。
@@ -239,15 +239,45 @@ void RpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn,
 // Closure的回调操作，用于序列化rpc的响应和网络发送
 void RpcProvider::SendRpcResponse(const muduo::net::TcpConnectionPtr &conn, google::protobuf::Message *response)
 {
+    constexpr uint32_t kMaxResponseBytes =
+        16 * 1024 * 1024;
+
+    // 序列化前限制响应大小。
+    if (response->ByteSizeLong() > kMaxResponseBytes)
+    {
+        LOG_ERR("rpc response too large");
+        conn->forceClose();
+        return;
+    }
+
     std::string response_str;
-    if (response->SerializeToString(&response_str)) // response进行序列化
+
+    if (!response->SerializeToString(&response_str))
     {
-        // 序列化成功后，通过网络把rpc方法执行的结果发送回去给rpc的调用方
-        conn->send(response_str);
+        LOG_ERR("serialize rpc response failed");
+        conn->forceClose();
+        return;
     }
-    else
-    {
-        std::cout << "serialize response_str error!" << std::endl;
-    }
-    conn->shutdown(); // 模拟http的短链接服务，由rpcprovider主动断开连接
+
+    const uint32_t response_size =
+        static_cast<uint32_t>(response_str.size());
+
+    // 将本机整数转换成网络字节序。
+    const uint32_t network_size = htonl(response_size);
+
+    // 拼接：[四字节长度][响应体]
+    std::string frame;
+    frame.reserve(sizeof(network_size) + response_str.size());
+
+    frame.append(
+        reinterpret_cast<const char *>(&network_size),
+        sizeof(network_size));
+
+    frame.append(response_str);
+
+    // Muduo 负责将未立即发完的数据放入输出缓冲区。
+    conn->send(frame);
+
+    // 保留短连接模式，在待发送数据处理后关闭发送方向。
+    conn->shutdown();
 }
