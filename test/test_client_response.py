@@ -271,13 +271,13 @@ def main():
         run_case(
             "长度字段只发送两字节就断开",
             [frame[:2]],
-            "read response length failed:",
+            "read response length: connection closed after receiving 2 of 4 bytes",
         )
 
         run_case(
             "响应体未发送完整就断开",
             [frame[:-1]],
-            "read response body failed:",
+            "read response body: connection closed",
         )
 
         run_case(
